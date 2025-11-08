@@ -14,3 +14,8 @@ redis>=5.0.1       # For caching and session management
 aiohttp>=3.9.0     # For async HTTP requests
 pytest>=7.4.3      # For testing
 httpx>=0.25.1      # For testing FastAPI applications
+
+# Technical Analysis Dependencies
+pandas>=2.1.2      # Data manipulation and analysis
+numpy>=1.24.0      # Numerical computations
+ta-lib>=0.4.28     # Technical analysis indicators
