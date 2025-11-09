@@ -48,17 +48,18 @@ class ZerodhaClient:
     A client for interacting with Zerodha's Kite Connect APIs.
     Handles authentication, session management, and API operations.
     """
-    
-    def __init__(self, api_key: str, api_secret: str):
+    def __init__(self, api_key: str, api_secret: str, redirect_url: str):
         """
-        Initialize the Zerodha client with API credentials
+        Initialize the Zerodha client with API credentials and redirect URL
         
         Args:
             api_key: The API key from Zerodha
             api_secret: The API secret from Zerodha
+            redirect_url: The OAuth redirect URL (from config)
         """
         self.api_key = api_key
         self.api_secret = api_secret
+        self.redirect_url = redirect_url
         self.kite = KiteConnect(api_key=api_key)
         self._access_token = None
 
@@ -80,7 +81,6 @@ class ZerodhaClient:
     def get_login_url(self) -> str:
         """
         Get the Zerodha login URL for user authentication
-        
         Returns:
             str: The login URL
         """

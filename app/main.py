@@ -19,12 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import logging.handlers
 import sys
-from typing import Dict
+from typing import Dict, List
 from datetime import datetime
+import json
 
 from .config import get_settings, Settings
 from .zerodha_client import ZerodhaClient
-from .database import get_redis, init_redis_pool
+from .database import get_redis, Database
 from .models import UserBase
 
 # Configure logging
@@ -83,20 +84,18 @@ app.add_middleware(
 def get_zerodha_client(settings: Settings = Depends(get_settings)) -> ZerodhaClient:
     """
     Dependency to get a configured Zerodha client instance.
-    
     Args:
         settings: Application settings from environment
-        
     Returns:
         ZerodhaClient: Configured Zerodha client instance
-    
     Note:
         This is injected into route handlers that need Zerodha access
     """
     logger.debug("Creating new Zerodha client instance")
     return ZerodhaClient(
         api_key=settings.KITE_API_KEY,
-        api_secret=settings.KITE_API_SECRET
+        api_secret=settings.KITE_API_SECRET,
+        redirect_url=settings.REDIRECT_URL
     )
 
 @app.on_event("startup")
@@ -111,7 +110,7 @@ async def startup_event():
     """
     logger.info("Starting application initialization")
     try:
-        await init_redis_pool()
+        await Database.init_db()
         logger.info("Redis connection pool initialized successfully")
         
         # Verify critical settings
@@ -276,9 +275,12 @@ async def auth_callback(
             detail=f"Authentication failed: {str(e)}"
         )
 
+from typing import Optional
+
 @app.get("/profile", status_code=status.HTTP_200_OK)
 async def get_profile(
     request: Request,
+    access_token: Optional[str] = None,
     zerodha: ZerodhaClient = Depends(get_zerodha_client)
 ) -> Dict:
     """
@@ -286,6 +288,7 @@ async def get_profile(
     
     Args:
         request: FastAPI request object
+        access_token: Optional access token for Zerodha session
         zerodha: Zerodha client instance
         
     Returns:
@@ -296,6 +299,8 @@ async def get_profile(
     """
     logger.info("Profile request received")
     try:
+        if access_token:
+            zerodha.set_access_token(access_token)
         profile = zerodha.get_profile()
         logger.debug(f"Profile fetched successfully for user {profile['user_id']}")
         return profile
@@ -306,13 +311,16 @@ async def get_profile(
             detail="Failed to fetch profile"
         )
 
+from typing import Optional
+
 @app.get("/holdings", status_code=status.HTTP_200_OK)
 async def get_holdings(
     request: Request,
+    access_token: Optional[str] = None,
     zerodha: ZerodhaClient = Depends(get_zerodha_client),
     redis=Depends(get_redis),
     settings: Settings = Depends(get_settings)
-) -> Dict:
+) -> List[Dict]:
     """
     Get user holdings with Redis caching.
     
@@ -324,43 +332,42 @@ async def get_holdings(
     
     Args:
         request: FastAPI request object
+        access_token: Optional access token for Zerodha session
         zerodha: Zerodha client instance
         redis: Redis connection for caching
         settings: Application settings
         
     Returns:
-        Dict: User's holdings information
+        List[Dict]: User's holdings information
         
     Raises:
         HTTPException: If holdings fetch fails
     """
     try:
+        # Set access token if provided
+        if access_token:
+            zerodha.set_access_token(access_token)
         # Get user profile for cache key
         profile = zerodha.get_profile()
         user_id = profile["user_id"]
         logger.info(f"Holdings request received for user {user_id}")
-        
         # Try to get from cache
         cache_key = f"user:{user_id}:holdings"
         logger.debug(f"Checking cache for holdings with key {cache_key}")
         cached_holdings = await redis.get(cache_key)
-        
         if cached_holdings:
             logger.debug("Holdings found in cache")
-            return cached_holdings
-        
+            return json.loads(cached_holdings)
         # If not in cache, fetch from Zerodha
         logger.debug("Holdings not in cache, fetching from Zerodha")
         holdings = zerodha.get_holdings()
-        
         # Store in cache
         logger.debug("Updating holdings cache")
         await redis.set(
             cache_key,
-            holdings,
+            json.dumps(holdings),
             ex=settings.CACHE_TTL_HOLDINGS
         )
-        
         # Log metrics
         metrics_logger.info(
             "HOLDINGS_FETCH|%s|%s|%d",
@@ -368,7 +375,6 @@ async def get_holdings(
             "success",
             len(holdings)
         )
-        
         return holdings
     except Exception as e:
         logger.error(f"Failed to fetch holdings: {str(e)}")
@@ -380,4 +386,79 @@ async def get_holdings(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to fetch holdings: {str(e)}"
+        )
+
+@app.get("/positions", status_code=status.HTTP_200_OK)
+async def get_positions(
+    request: Request,
+    access_token: Optional[str] = None,
+    zerodha: ZerodhaClient = Depends(get_zerodha_client),
+    redis=Depends(get_redis),
+    settings: Settings = Depends(get_settings)
+) -> Dict:
+    """
+    Get user positions with Redis caching.
+    
+    This endpoint:
+    1. Checks Redis cache for positions
+    2. If not found, fetches from Zerodha
+    3. Updates cache with new data
+    4. Returns positions to client
+    
+    Args:
+        request: FastAPI request object
+        access_token: Optional access token for Zerodha session
+        zerodha: Zerodha client instance
+        redis: Redis connection for caching
+        settings: Application settings
+        
+    Returns:
+        Dict: User's positions information
+        
+    Raises:
+        HTTPException: If positions fetch fails
+    """
+    try:
+        # Set access token if provided
+        if access_token:
+            zerodha.set_access_token(access_token)
+        # Get user profile for cache key
+        profile = zerodha.get_profile()
+        user_id = profile["user_id"]
+        logger.info(f"Positions request received for user {user_id}")
+        # Try to get from cache
+        cache_key = f"user:{user_id}:positions"
+        logger.debug(f"Checking cache for positions with key {cache_key}")
+        cached_positions = await redis.get(cache_key)
+        if cached_positions:
+            logger.debug("Positions found in cache")
+            return json.loads(cached_positions)
+        # If not in cache, fetch from Zerodha
+        logger.debug("Positions not in cache, fetching from Zerodha")
+        positions = zerodha.get_positions()
+        # Store in cache
+        logger.debug("Updating positions cache")
+        await redis.set(
+            cache_key,
+            json.dumps(positions),
+            ex=settings.CACHE_TTL_POSITIONS
+        )
+        # Log metrics
+        metrics_logger.info(
+            "POSITIONS_FETCH|%s|%s|%d",
+            user_id,
+            "success",
+            len(positions.get("net", []))
+        )
+        return positions
+    except Exception as e:
+        logger.error(f"Failed to fetch positions: {str(e)}")
+        metrics_logger.info(
+            "POSITIONS_FETCH|%s|%s",
+            user_id if 'user_id' in locals() else "unknown",
+            "failed"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch positions: {str(e)}"
         )

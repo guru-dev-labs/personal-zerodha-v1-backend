@@ -1,16 +1,16 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Zerodha Trading Backend - Mumbai Region'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Zerodha Trading Backend - Mumbai Region"
 
 Parameters:
   KeyName:
-    Description: 'Name of an existing EC2 KeyPair'
+    Description: "Name of an existing EC2 KeyPair"
     Type: String
-    Default: 'zerodha-trading-key'
+    Default: "zerodha-trading-key"
 
   InstanceType:
-    Description: 'EC2 instance type'
+    Description: "EC2 instance type"
     Type: String
-    Default: 't3.micro'
+    Default: "t3.micro"
     AllowedValues:
       - t3.micro
       - t3.small
@@ -21,7 +21,7 @@ Resources:
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: 'Security group for Zerodha trading app'
+      GroupDescription: "Security group for Zerodha trading app"
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -42,7 +42,7 @@ Resources:
     Properties:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
-      ImageId: ami-0f5ee92e2d63afc18  # Amazon Linux 2 Mumbai
+      ImageId: ami-0f5ee92e2d63afc18 # Amazon Linux 2 Mumbai
       SecurityGroupIds:
         - !Ref SecurityGroup
       UserData:
@@ -82,13 +82,13 @@ Resources:
 
 Outputs:
   InstanceId:
-    Description: 'Instance ID'
+    Description: "Instance ID"
     Value: !Ref EC2Instance
     Export:
-      Name: !Sub '${AWS::StackName}-InstanceId'
+      Name: !Sub "${AWS::StackName}-InstanceId"
 
   PublicIP:
-    Description: 'Public IP address'
+    Description: "Public IP address"
     Value: !GetAtt EC2Instance.PublicIp
     Export:
-      Name: !Sub '${AWS::StackName}-PublicIP'
+      Name: !Sub "${AWS::StackName}-PublicIP"

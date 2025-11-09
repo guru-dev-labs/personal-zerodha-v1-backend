@@ -1,5 +1,5 @@
 from typing import AsyncGenerator
-import redis.asyncio as redis
+from redis.asyncio import Redis
 from supabase import create_client, Client
 from app.config import get_settings
 
@@ -7,7 +7,7 @@ settings = get_settings()
 
 class Database:
     supabase: Client = None
-    redis: redis.Redis = None
+    redis: Redis = None
     
     @classmethod
     async def init_db(cls) -> None:
@@ -19,11 +19,8 @@ class Database:
         )
         
         # Initialize Redis
-        cls.redis = redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            password=settings.REDIS_PASSWORD,
+        cls.redis = Redis.from_url(
+            settings.REDIS_URL,
             decode_responses=True  # Automatically decode responses to Python strings
         )
     
@@ -34,7 +31,7 @@ class Database:
             await cls.redis.close()
     
     @classmethod
-    async def get_redis(cls) -> redis.Redis:
+    async def get_redis(cls) -> Redis:
         """Get Redis connection"""
         if not cls.redis:
             await cls.init_db()
@@ -50,8 +47,17 @@ class Database:
             )
         return cls.supabase
 
+# Compatibility functions for existing code
+async def init_redis_pool() -> None:
+    """Initialize Redis connection pool - compatibility wrapper"""
+    await Database.init_db()
+
+async def close_redis_pool() -> None:
+    """Close Redis connection pool - compatibility wrapper"""
+    await Database.close_db()
+
 # FastAPI dependency for Redis
-async def get_redis() -> AsyncGenerator[redis.Redis, None]:
+async def get_redis() -> AsyncGenerator[Redis, None]:
     """Dependency for getting Redis connection"""
     redis_client = await Database.get_redis()
     try:

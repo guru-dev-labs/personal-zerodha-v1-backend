@@ -135,7 +135,8 @@ class ScreenerEngine:
             
             # Convert to DataFrame
             df = pd.DataFrame(data)
-            df.set_index('date', inplace=True)
+            # Always use 'timestamp' as the index column
+            df.set_index('timestamp', inplace=True)
             return df
             
         except Exception as e:
