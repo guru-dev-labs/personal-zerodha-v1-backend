@@ -25,6 +25,8 @@ venv/
 env/
 ENV/
 .env
+.env.local
+.env.*.local
 
 # IDE
 .idea/
@@ -35,9 +37,21 @@ ENV/
 
 # Project specific
 .env
+.env.*
 *.log
 logs/
 *.sqlite3
+*.db
+
+# AWS / Cloud
+*.pem
+*.key
+*.p12
+*.pfx
+aws-exports.js
+serverless.yml
+.chalice/
+.serverless/
 
 # Supabase
 .supabase/
@@ -54,3 +68,33 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.tmp/
+
+# Installers and binaries
+*.pkg
+*.dmg
+*.exe
+*.msi
+*.deb
+*.rpm
+
+# API Keys and Secrets
+config/secrets.json
+secrets.json
+.env.production
+.env.staging
+.env.development
