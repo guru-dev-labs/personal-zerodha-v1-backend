@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Zerodha Trading Backend - Mumbai Region'
+
+Parameters:
+  KeyName:
+    Description: 'Name of an existing EC2 KeyPair'
+    Type: String
+    Default: 'zerodha-trading-key'
+
+  InstanceType:
+    Description: 'EC2 instance type'
+    Type: String
+    Default: 't3.micro'
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+
+Resources:
+  # Security Group
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for Zerodha trading app'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  # EC2 Instance
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: ami-0f5ee92e2d63afc18  # Amazon Linux 2 Mumbai
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash
+            yum update -y
+            amazon-linux-extras install docker -y
+            systemctl start docker
+            systemctl enable docker
+            usermod -a -G docker ec2-user
+
+            # Install Git and clone repo
+            yum install -y git
+            cd /home/ec2-user
+            git clone https://github.com/guru-dev-labs/personal-zerodha-v1-backend.git app
+            cd app
+            git checkout feature/database-setup
+
+            # Setup environment
+            cp .env.production .env
+
+            # Install and start Redis
+            yum install -y redis
+            systemctl start redis
+            systemctl enable redis
+
+            # Build and run app
+            docker build -t zerodha-app .
+            docker run -d --name zerodha-app -p 80:8000 --restart unless-stopped --env-file .env zerodha-app
+
+      Tags:
+        - Key: Name
+          Value: zerodha-backend
+        - Key: Environment
+          Value: production
+
+Outputs:
+  InstanceId:
+    Description: 'Instance ID'
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
+
+  PublicIP:
+    Description: 'Public IP address'
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicIP'
