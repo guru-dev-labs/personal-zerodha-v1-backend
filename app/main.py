@@ -19,13 +19,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import logging.handlers
 import sys
-from typing import Dict, List
+from typing import Dict
 from datetime import datetime
-import json
+import asyncio
 
 from .config import get_settings, Settings
 from .zerodha_client import ZerodhaClient
-from .database import get_redis, Database
+from .database import get_redis, init_redis_pool
+from .short_sell_scanner import ShortSellScanner
 from .models import UserBase
 
 # Configure logging
@@ -84,19 +85,31 @@ app.add_middleware(
 def get_zerodha_client(settings: Settings = Depends(get_settings)) -> ZerodhaClient:
     """
     Dependency to get a configured Zerodha client instance.
+    
     Args:
         settings: Application settings from environment
+        
     Returns:
         ZerodhaClient: Configured Zerodha client instance
+    
     Note:
         This is injected into route handlers that need Zerodha access
     """
     logger.debug("Creating new Zerodha client instance")
     return ZerodhaClient(
         api_key=settings.KITE_API_KEY,
-        api_secret=settings.KITE_API_SECRET,
-        redirect_url=settings.REDIRECT_URL
+        api_secret=settings.KITE_API_SECRET
     )
+
+# Global scanner instance
+short_sell_scanner = None
+
+def get_short_sell_scanner(zerodha: ZerodhaClient = Depends(get_zerodha_client)) -> ShortSellScanner:
+    """Get the global short sell scanner instance"""
+    global short_sell_scanner
+    if short_sell_scanner is None:
+        short_sell_scanner = ShortSellScanner(zerodha)
+    return short_sell_scanner
 
 @app.on_event("startup")
 async def startup_event():
@@ -107,10 +120,11 @@ async def startup_event():
     1. Initializes Redis connection pool
     2. Verifies critical environment variables
     3. Sets up logging
+    4. Initializes short sell scanner
     """
     logger.info("Starting application initialization")
     try:
-        await Database.init_db()
+        await init_redis_pool()
         logger.info("Redis connection pool initialized successfully")
         
         # Verify critical settings
@@ -126,6 +140,20 @@ async def startup_event():
                 raise ValueError(f"Missing critical setting: {setting}")
         
         logger.info("Critical settings verified successfully")
+        
+        # Initialize short sell scanner
+        global short_sell_scanner
+        zerodha_client = ZerodhaClient(
+            api_key=settings.KITE_API_KEY,
+            api_secret=settings.KITE_API_SECRET
+        )
+        short_sell_scanner = ShortSellScanner(zerodha_client)
+        await short_sell_scanner.initialize()
+        
+        # Start background scanning
+        asyncio.create_task(short_sell_scanner.start_continuous_scanning())
+        logger.info("Short sell scanner initialized and started")
+        
         logger.info("Application startup completed successfully")
     except Exception as e:
         logger.critical(f"Application startup failed: {str(e)}")
@@ -275,12 +303,9 @@ async def auth_callback(
             detail=f"Authentication failed: {str(e)}"
         )
 
-from typing import Optional
-
 @app.get("/profile", status_code=status.HTTP_200_OK)
 async def get_profile(
     request: Request,
-    access_token: Optional[str] = None,
     zerodha: ZerodhaClient = Depends(get_zerodha_client)
 ) -> Dict:
     """
@@ -288,7 +313,6 @@ async def get_profile(
     
     Args:
         request: FastAPI request object
-        access_token: Optional access token for Zerodha session
         zerodha: Zerodha client instance
         
     Returns:
@@ -299,8 +323,6 @@ async def get_profile(
     """
     logger.info("Profile request received")
     try:
-        if access_token:
-            zerodha.set_access_token(access_token)
         profile = zerodha.get_profile()
         logger.debug(f"Profile fetched successfully for user {profile['user_id']}")
         return profile
@@ -311,16 +333,13 @@ async def get_profile(
             detail="Failed to fetch profile"
         )
 
-from typing import Optional
-
 @app.get("/holdings", status_code=status.HTTP_200_OK)
 async def get_holdings(
     request: Request,
-    access_token: Optional[str] = None,
     zerodha: ZerodhaClient = Depends(get_zerodha_client),
     redis=Depends(get_redis),
     settings: Settings = Depends(get_settings)
-) -> List[Dict]:
+) -> Dict:
     """
     Get user holdings with Redis caching.
     
@@ -332,42 +351,43 @@ async def get_holdings(
     
     Args:
         request: FastAPI request object
-        access_token: Optional access token for Zerodha session
         zerodha: Zerodha client instance
         redis: Redis connection for caching
         settings: Application settings
         
     Returns:
-        List[Dict]: User's holdings information
+        Dict: User's holdings information
         
     Raises:
         HTTPException: If holdings fetch fails
     """
     try:
-        # Set access token if provided
-        if access_token:
-            zerodha.set_access_token(access_token)
         # Get user profile for cache key
         profile = zerodha.get_profile()
         user_id = profile["user_id"]
         logger.info(f"Holdings request received for user {user_id}")
+        
         # Try to get from cache
         cache_key = f"user:{user_id}:holdings"
         logger.debug(f"Checking cache for holdings with key {cache_key}")
         cached_holdings = await redis.get(cache_key)
+        
         if cached_holdings:
             logger.debug("Holdings found in cache")
-            return json.loads(cached_holdings)
+            return cached_holdings
+        
         # If not in cache, fetch from Zerodha
         logger.debug("Holdings not in cache, fetching from Zerodha")
         holdings = zerodha.get_holdings()
+        
         # Store in cache
         logger.debug("Updating holdings cache")
         await redis.set(
             cache_key,
-            json.dumps(holdings),
+            holdings,
             ex=settings.CACHE_TTL_HOLDINGS
         )
+        
         # Log metrics
         metrics_logger.info(
             "HOLDINGS_FETCH|%s|%s|%d",
@@ -375,6 +395,7 @@ async def get_holdings(
             "success",
             len(holdings)
         )
+        
         return holdings
     except Exception as e:
         logger.error(f"Failed to fetch holdings: {str(e)}")
@@ -388,77 +409,86 @@ async def get_holdings(
             detail=f"Failed to fetch holdings: {str(e)}"
         )
 
-@app.get("/positions", status_code=status.HTTP_200_OK)
-async def get_positions(
-    request: Request,
-    access_token: Optional[str] = None,
-    zerodha: ZerodhaClient = Depends(get_zerodha_client),
-    redis=Depends(get_redis),
-    settings: Settings = Depends(get_settings)
+# Short Sell Scanner Endpoints
+
+@app.get("/short-sell/alerts", status_code=status.HTTP_200_OK)
+async def get_short_sell_alerts(
+    scanner: ShortSellScanner = Depends(get_short_sell_scanner)
 ) -> Dict:
     """
-    Get user positions with Redis caching.
+    Get all active short sell alerts.
     
-    This endpoint:
-    1. Checks Redis cache for positions
-    2. If not found, fetches from Zerodha
-    3. Updates cache with new data
-    4. Returns positions to client
-    
-    Args:
-        request: FastAPI request object
-        access_token: Optional access token for Zerodha session
-        zerodha: Zerodha client instance
-        redis: Redis connection for caching
-        settings: Application settings
-        
     Returns:
-        Dict: User's positions information
-        
-    Raises:
-        HTTPException: If positions fetch fails
+        Dict: List of active short sell opportunities
     """
     try:
-        # Set access token if provided
-        if access_token:
-            zerodha.set_access_token(access_token)
-        # Get user profile for cache key
-        profile = zerodha.get_profile()
-        user_id = profile["user_id"]
-        logger.info(f"Positions request received for user {user_id}")
-        # Try to get from cache
-        cache_key = f"user:{user_id}:positions"
-        logger.debug(f"Checking cache for positions with key {cache_key}")
-        cached_positions = await redis.get(cache_key)
-        if cached_positions:
-            logger.debug("Positions found in cache")
-            return json.loads(cached_positions)
-        # If not in cache, fetch from Zerodha
-        logger.debug("Positions not in cache, fetching from Zerodha")
-        positions = zerodha.get_positions()
-        # Store in cache
-        logger.debug("Updating positions cache")
-        await redis.set(
-            cache_key,
-            json.dumps(positions),
-            ex=settings.CACHE_TTL_POSITIONS
-        )
-        # Log metrics
-        metrics_logger.info(
-            "POSITIONS_FETCH|%s|%s|%d",
-            user_id,
-            "success",
-            len(positions.get("net", []))
-        )
-        return positions
+        alerts = await scanner.get_active_alerts()
+        return {
+            "status": "success",
+            "alerts": [alert.dict() for alert in alerts],
+            "count": len(alerts)
+        }
     except Exception as e:
-        logger.error(f"Failed to fetch positions: {str(e)}")
-        metrics_logger.info(
-            "POSITIONS_FETCH|%s|%s",
-            user_id if 'user_id' in locals() else "unknown",
-            "failed"
-        )
+        logger.error(f"Failed to get short sell alerts: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to fetch positions: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch alerts"
+        )
+
+@app.get("/short-sell/alerts/{instrument_token}", status_code=status.HTTP_200_OK)
+async def get_short_sell_alert(
+    instrument_token: str,
+    scanner: ShortSellScanner = Depends(get_short_sell_scanner)
+) -> Dict:
+    """
+    Get short sell alert for specific instrument.
+    
+    Args:
+        instrument_token: Zerodha instrument token
+        
+    Returns:
+        Dict: Alert details if active
+    """
+    try:
+        alert = await scanner.get_alert_by_instrument(instrument_token)
+        if alert:
+            return {
+                "status": "success",
+                "alert": alert.dict()
+            }
+        else:
+            return {
+                "status": "not_found",
+                "message": "No active alert for this instrument"
+            }
+    except Exception as e:
+        logger.error(f"Failed to get alert for {instrument_token}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch alert"
+        )
+
+@app.post("/short-sell/scan", status_code=status.HTTP_200_OK)
+async def trigger_manual_scan(
+    scanner: ShortSellScanner = Depends(get_short_sell_scanner)
+) -> Dict:
+    """
+    Manually trigger a short sell scan.
+    
+    Returns:
+        Dict: Scan results
+    """
+    try:
+        await scanner._perform_scan()
+        alerts = await scanner.get_active_alerts()
+        return {
+            "status": "success",
+            "message": "Manual scan completed",
+            "active_alerts": len(alerts)
+        }
+    except Exception as e:
+        logger.error(f"Manual scan failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Manual scan failed"
         )

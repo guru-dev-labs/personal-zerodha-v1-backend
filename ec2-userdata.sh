@@ -32,7 +32,7 @@ git checkout feature/database-setup
 cat > .env << EOF
 # Environment Configuration
 ENVIRONMENT=production
-APP_HOST=rupiya.life
+APP_HOST=api.rupiya.life
 APP_PORT=443
 
 # Redis Configuration (local Redis on EC2)
@@ -77,7 +77,7 @@ systemctl enable nginx
 cat > /etc/nginx/conf.d/zerodha.conf << EOF
 server {
     listen 80;
-    server_name rupiya.life;
+    server_name api.rupiya.life;
 
     location / {
         proxy_pass http://localhost:8000;

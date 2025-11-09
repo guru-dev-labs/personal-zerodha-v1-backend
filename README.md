@@ -1,189 +1,211 @@
-# Personal Zerodha Backend 🚀
+# Personal Zerodha Backend
 
-A sophisticated algorithmic trading backend service built with FastAPI, providing complete Zerodha integration for portfolio management, technical analysis, and automated trading.
+A sophisticated algorithmic trading backend built with Python, FastAPI, and Zerodha Kite API. Features real-time market scanning, automated trading signals, and comprehensive risk management.
 
-## 📊 Project Status
+## 🚨 Security Notice
 
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-green.svg)](http://127.0.0.1:8000/docs)
-[![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-17%2F17%20Passing-success.svg)]()
-[![OAuth](https://img.shields.io/badge/OAuth-Working-brightgreen.svg)]()
+**This repository contains sensitive configuration. Never commit actual secrets to version control.**
 
-**Current Status: PRODUCTION READY** ✨
+### What Was Fixed
 
-The backend is fully functional with end-to-end Zerodha OAuth integration, Redis caching, and comprehensive API documentation.
+- ✅ Removed `.env` files containing API keys from Git history
+- ✅ Removed private key files (`.pem`) from repository
+- ✅ Updated `.gitignore` to prevent future exposure
+- ✅ Added comprehensive `.env.example` template
 
-## 🎯 Key Features
+### If You Cloned This Repo
 
-- ✅ **Complete OAuth Integration** - Secure Zerodha authentication flow
-- ✅ **Portfolio Management** - Real-time holdings and positions with caching
-- ✅ **Technical Analysis Engine** - 7+ indicators (RSI, MACD, Bollinger Bands, ATR, etc.)
-- ✅ **Redis Caching** - Optimized performance with configurable TTL
-- ✅ **Comprehensive Testing** - 17/17 tests passing
-- ✅ **Interactive Documentation** - Swagger UI + HTML docs
-- 🔄 **Market Screening** - Automated stock screening (planned)
-- 🔄 **Real-time WebSocket** - Live market data (planned)
-- 🔄 **Order Management** - Complete trading lifecycle (planned)
+If you cloned this repository and see sensitive files, **delete them immediately** and regenerate new credentials.
 
-## 🚀 Quick Start
+## 🛠️ Quick Start
 
-### Prerequisites
-- Python 3.13+
-- Redis server
-- Zerodha trading account with API access
-
-### Installation
+### 1. Clone Repository
 
 ```bash
-# Clone repository
 git clone https://github.com/guru-dev-labs/personal-zerodha-v1-backend.git
 cd personal-zerodha-v1-backend
+```
 
+### 2. Set Up Environment
+
+```bash
 # Create virtual environment
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your Zerodha API credentials
 ```
 
-### Running the Application
+### 3. Configure Environment Variables
 
 ```bash
-# Start Redis server (if not running)
-redis-server
+# Copy template
+cp .env.example .env
 
-# Start the application
-uvicorn app.main:app --reload
-
-# Access documentation
-open http://127.0.0.1:8000/docs  # HTML Documentation
-open http://127.0.0.1:8000/api/docs  # Swagger UI
+# Edit .env with your actual values
+nano .env
 ```
 
-### Testing the API
+**Required Environment Variables:**
+
+- `KITE_API_KEY` - From Zerodha Kite Connect
+- `KITE_API_SECRET` - From Zerodha Kite Connect
+- `SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_KEY` - Your Supabase anon key
+
+### 4. Set Up Zerodha API
+
+1. Go to [Zerodha Kite Connect](https://kite.zerodha.com/connect/login)
+2. Create a new app or use existing one
+3. Copy API Key and Secret to `.env`
+4. Set redirect URL to: `http://localhost:8000/auth/callback`
+
+### 5. Run Application
+
+```bash
+# Development
+uvicorn app.main:app --reload
+
+# Production
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## 📡 API Endpoints
+
+### Authentication
+
+- `GET /auth/login` - Get Zerodha login URL
+- `GET /auth/callback` - Handle OAuth callback
+
+### Trading Data
+
+- `GET /profile` - User profile
+- `GET /holdings` - Portfolio holdings
+
+### Short Sell Scanner
+
+- `GET /short-sell/alerts` - Active short sell opportunities
+- `GET /short-sell/alerts/{instrument_token}` - Specific instrument alert
+- `POST /short-sell/scan` - Manual scan trigger
+
+## 🚀 Deployment
+
+### AWS Deployment
+
+```bash
+# Configure AWS CLI
+aws configure
+
+# Make scripts executable
+chmod +x deploy-aws.sh ec2-userdata.sh
+
+# Deploy
+./deploy-aws.sh
+```
+
+### Environment Setup for Production
+
+```bash
+# Update .env for production
+ENVIRONMENT=production
+APP_HOST=your-domain.com
+APP_PORT=443
+DEBUG=False
+```
+
+## 🔐 Security Best Practices
+
+### Never Commit These Files:
+
+- `.env` (use `.env.example` as template)
+- `*.pem`, `*.key` (private keys)
+- `*.p12`, `*.pfx` (certificates)
+- AWS credentials files
+
+### Environment Variables:
+
+- Use strong, unique secrets
+- Rotate API keys regularly
+- Use different keys for dev/staging/prod
+
+### AWS Security:
+
+- Use IAM roles instead of access keys
+- Enable MFA on AWS account
+- Regularly rotate access keys
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   FastAPI       │    │   Zerodha API   │
+│   (React/Vue)   │◄──►│   Backend       │◄──►│   (Kite)        │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                              │
+                              ▼
+                       ┌─────────────────┐
+                       │   Redis Cache   │
+                       └─────────────────┘
+                              │
+                              ▼
+                       ┌─────────────────┐
+                       │   Supabase DB   │
+                       └─────────────────┘
+```
+
+## 📊 Features
+
+- ✅ **Real-time Market Scanning** - Nifty 500 stocks, custom conditions
+- ✅ **Short Sell Alerts** - Automated opportunity detection
+- ✅ **Risk Management** - Position sizing, stop losses
+- ✅ **Portfolio Tracking** - Holdings, P&L, performance
+- ✅ **Caching Layer** - Redis for fast data access
+- ✅ **Background Tasks** - Continuous scanning during market hours
+
+## 🧪 Testing
 
 ```bash
 # Run tests
-python -m pytest tests/ -v
+pytest
 
-# Test OAuth flow
-curl -X GET "http://127.0.0.1:8000/auth/login"
-# Follow the returned login_url, complete OAuth
-# Use returned access_token for authenticated endpoints
+# Run with coverage
+pytest --cov=app --cov-report=html
 ```
 
-## 📖 Documentation
+## 📝 Development
 
-- **[📄 HTML Documentation](http://127.0.0.1:8000/docs)** - Comprehensive project overview, API reference, and guides
-- **[🔗 Swagger UI](http://127.0.0.1:8000/api/docs)** - Interactive API documentation and testing
-- **[📊 Jupyter Notebook](dev_api_explorer.ipynb)** - API exploration and visualization examples
-
-## 🛠️ Technology Stack
-
-- **Backend**: FastAPI, Python 3.13
-- **Database**: Redis (caching), Supabase (persistence)
-- **Trading API**: Zerodha Kite Connect
-- **Analysis**: TA-Lib, Pandas, NumPy
-- **Testing**: pytest, pytest-asyncio
-- **Documentation**: Swagger UI, Custom HTML
-
-## 🔌 API Endpoints
-
-| Method | Endpoint | Description | Status |
-|--------|----------|-------------|--------|
-| GET | `/` | Health check | ✅ |
-| GET | `/docs` | HTML Documentation | ✅ |
-| GET | `/auth/login` | Initiate OAuth flow | ✅ |
-| GET | `/auth/callback` | Handle OAuth callback | ✅ |
-| GET | `/profile` | User profile | ✅ |
-| GET | `/holdings` | Portfolio holdings | ✅ |
-| GET | `/positions` | Current positions | ✅ |
-
-## 🔒 Security & Authentication
-
-- **OAuth 2.0** integration with Zerodha
-- **Token Management** with Redis session storage
-- **CORS** protection for localhost development
-- **Input Validation** using Pydantic models
-- **Secure Token Storage** with configurable TTL
-
-## 📊 Architecture
+### Code Structure
 
 ```
-personal-zerodha-v1-backend/
-├── app/
-│   ├── main.py          # FastAPI application & routes
-│   ├── config.py        # Settings & environment variables
-│   ├── zerodha_client.py # KiteConnect wrapper
-│   ├── database.py      # Redis & Supabase connections
-│   ├── screener.py      # Technical analysis engine
-│   ├── models.py        # Pydantic data models
-│   └── websocket.py     # Real-time data handling
-├── docs/                # HTML documentation
-├── tests/               # Comprehensive test suite
-├── dev_api_explorer.ipynb # Jupyter notebook
-└── requirements.txt     # Python dependencies
+app/
+├── main.py              # FastAPI application
+├── models.py            # Pydantic models
+├── zerodha_client.py    # Zerodha API client
+├── short_sell_scanner.py # Market scanner
+├── database.py          # DB connections
+└── config.py            # Settings
 ```
 
-## 🗺️ Development Roadmap
+### Adding New Features
 
-### Phase 1: Core Infrastructure ✅ COMPLETED
-- FastAPI application setup
-- Zerodha OAuth integration
-- Redis caching layer
-- Basic portfolio endpoints
-- Comprehensive test suite
-
-### Phase 2: Market Data & Trading 🔄 IN PROGRESS
-- Market data endpoints
-- Order management system
-- WebSocket integration
-- Order status tracking
-
-### Phase 3: Advanced Features 🔄 PLANNED
-- Screener API endpoints
-- Alert system
-- Portfolio analytics
-- Backtesting framework
-
-### Phase 4: Production & Scale 🔄 PLANNED
-- PostgreSQL migration
-- User management
-- API rate limiting
-- Monitoring infrastructure
+1. Create feature branch
+2. Add tests
+3. Update documentation
+4. Create PR
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Write tests for new functionality
-4. Implement the feature
-5. Update documentation
-6. Submit a pull request
+2. Create feature branch
+3. Make changes
+4. Add tests
+5. Submit PR
 
-## 📞 Support & Resources
+## 📄 License
 
-- **📄 [HTML Documentation](http://127.0.0.1:8000/docs)** - Complete project guide
-- **🔗 [Swagger UI](http://127.0.0.1:8000/api/docs)** - API testing interface
-- **📚 [Zerodha Kite Docs](https://kite.trade/docs/connect/v3/)** - Official API documentation
-- **🚀 [FastAPI Docs](https://fastapi.tiangolo.com/)** - Framework documentation
+Private - All rights reserved
 
-## 📈 Performance Metrics
+## ⚠️ Disclaimer
 
-- **API Response Time**: <100ms (cached), <500ms (fresh)
-- **Cache Hit Rate**: >90% for portfolio data
-- **Test Coverage**: 100% core functionality
-- **OAuth Success Rate**: 100%
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-**Built with ❤️ using FastAPI & Python** | **Version 1.0.0** | **November 2025**
+This software is for educational purposes only. Trading involves risk. Past performance doesn't guarantee future results. Always do your own research and never risk more than you can afford to lose.

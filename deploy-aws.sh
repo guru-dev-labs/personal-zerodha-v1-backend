@@ -16,7 +16,7 @@ echo "🚀 Deploying to AWS Mumbai Region..."
 
 # Check if security group already exists
 SG_EXISTS=$(aws ec2 describe-security-groups \
-    --group-names $SECURITY_GROUP_NAME \
+    --filters Name=group-name,Values=$SECURITY_GROUP_NAME \
     --region $REGION \
     --query 'SecurityGroups[0].GroupId' \
     --output text 2>/dev/null || echo "none")
@@ -25,6 +25,7 @@ if [ "$SG_EXISTS" != "none" ]; then
     echo "Security group '$SECURITY_GROUP_NAME' already exists: $SG_EXISTS"
     SG_ID=$SG_EXISTS
 else
+    # Create security group
     echo "Creating security group..."
     SG_ID=$(aws ec2 create-security-group \
         --group-name $SECURITY_GROUP_NAME \
@@ -39,21 +40,21 @@ else
         --protocol tcp \
         --port 22 \
         --cidr 0.0.0.0/0 \
-        --region $REGION
+        --region $REGION || true
 
     aws ec2 authorize-security-group-ingress \
         --group-id $SG_ID \
         --protocol tcp \
         --port 80 \
         --cidr 0.0.0.0/0 \
-        --region $REGION
+        --region $REGION || true
 
     aws ec2 authorize-security-group-ingress \
         --group-id $SG_ID \
         --protocol tcp \
         --port 443 \
         --cidr 0.0.0.0/0 \
-        --region $REGION
+        --region $REGION || true
 
     echo "Security group created: $SG_ID"
 fi
