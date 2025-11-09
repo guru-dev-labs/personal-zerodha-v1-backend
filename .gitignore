@@ -98,3 +98,4 @@ secrets.json
 .env.production
 .env.staging
 .env.development
+.secrets
