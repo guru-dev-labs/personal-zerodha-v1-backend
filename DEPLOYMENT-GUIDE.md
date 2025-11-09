@@ -1,37 +1,43 @@
-# 🚀 Deployment Guide for Other Laptop
+# 🚀 AWS Deployment Guide (Mumbai Region)
 
 ## Prerequisites (on your other laptop):
 1. Install AWS CLI: `pip install awscli`
 2. Configure AWS: `aws configure` (use Mumbai region: ap-south-1)
 3. Install Git
+4. Create EC2 key pair in AWS Console
 
-## Step 1: Clone and Deploy Backend
+## Step 1: Clone Repository
 ```bash
-# Clone the repository
 git clone https://github.com/guru-dev-labs/personal-zerodha-v1-backend.git
 cd personal-zerodha-v1-backend
-
-# Deploy to Railway (recommended)
-# Go to https://railway.app and deploy from GitHub
 ```
 
-## Step 2: Railway Deployment
-1. Connect GitHub repo
-2. Add environment variables:
-   - ENVIRONMENT=production
-   - APP_HOST=api.rupiya.life
-   - KITE_API_KEY=88mnhtfg26ldg5cd
-   - KITE_API_SECRET=x0q0jr6kprcxmbukd8imx5jocn3igori
-   - SUPABASE_URL=https://emjshqjjxstzhsipzefi.supabase.co
-   - SUPABASE_KEY=[your-key]
-   - DEBUG=False
-
-3. Add Redis database in Railway
-4. Set custom domain: api.rupiya.life
-
-## Step 3: Deploy Frontend (Vite)
+## Step 2: AWS Deployment
 ```bash
-# On your other laptop
+# Make scripts executable
+chmod +x deploy-aws.sh ec2-userdata.sh
+
+# Run deployment (creates EC2 instance in Mumbai)
+./deploy-aws.sh
+```
+
+## Step 3: Configure Domain
+1. Get the public IP from deployment output
+2. Update DNS: Point `api.rupiya.life` to the EC2 public IP
+3. Wait for DNS propagation (~5-10 minutes)
+
+## Step 4: Verify Deployment
+```bash
+# Test the API
+curl https://api.rupiya.life/
+
+# Check API documentation
+open https://api.rupiya.life/docs
+```
+
+## Step 5: Deploy Frontend (Vercel)
+```bash
+# On your other laptop or any machine
 git clone [your-frontend-repo]
 cd [frontend-directory]
 
@@ -42,12 +48,47 @@ vercel --prod
 # Set custom domain: rupiya.life
 ```
 
-## Step 4: Update Frontend API Calls
+## Step 6: Update Frontend API Calls
 In your frontend code, change API base URL to:
 ```javascript
 const API_BASE = 'https://api.rupiya.life';
 ```
 
-## Testing
-- Backend: https://api.rupiya.life/docs
-- Frontend: https://rupiya.life
+## Environment Variables (Auto-configured)
+The deployment script automatically sets up:
+- ENVIRONMENT=production
+- APP_HOST=api.rupiya.life
+- APP_PORT=443
+- Redis (local on EC2)
+- Zerodha API credentials
+- Supabase configuration
+
+## Monitoring & Maintenance
+```bash
+# SSH into your instance
+ssh -i zerodha-key.pem ec2-user@api.rupiya.life
+
+# Check app status
+sudo docker ps
+sudo docker logs zerodha-app
+
+# Check Redis
+redis-cli ping
+
+# Restart services
+sudo systemctl restart docker
+```
+
+## Cost Estimate (Mumbai Region)
+- EC2 t3.micro: ₹400/month
+- EBS Storage: ₹50/month
+- Data Transfer: ₹100/month
+- **Total: ₹550/month** (first 3 months free with AWS credits)
+
+## Troubleshooting
+- **Can't access API?** Check security groups allow ports 80/443
+- **App not starting?** Check Docker logs: `sudo docker logs zerodha-app`
+- **DNS not working?** Wait 10-15 minutes for propagation
+
+---
+**Deploy from your other laptop (not behind firewall) for best results!**

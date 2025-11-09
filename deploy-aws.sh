@@ -14,38 +14,49 @@ INSTANCE_NAME="zerodha-backend"
 
 echo "🚀 Deploying to AWS Mumbai Region..."
 
-# Create security group
-echo "Creating security group..."
-SG_ID=$(aws ec2 create-security-group \
-    --group-name $SECURITY_GROUP_NAME \
-    --description "Security group for Zerodha trading app" \
+# Check if security group already exists
+SG_EXISTS=$(aws ec2 describe-security-groups \
+    --group-names $SECURITY_GROUP_NAME \
     --region $REGION \
-    --output text \
-    --query 'GroupId')
+    --query 'SecurityGroups[0].GroupId' \
+    --output text 2>/dev/null || echo "none")
 
-# Add inbound rules
-aws ec2 authorize-security-group-ingress \
-    --group-id $SG_ID \
-    --protocol tcp \
-    --port 22 \
-    --cidr 0.0.0.0/0 \
-    --region $REGION
+if [ "$SG_EXISTS" != "none" ]; then
+    echo "Security group '$SECURITY_GROUP_NAME' already exists: $SG_EXISTS"
+    SG_ID=$SG_EXISTS
+else
+    echo "Creating security group..."
+    SG_ID=$(aws ec2 create-security-group \
+        --group-name $SECURITY_GROUP_NAME \
+        --description "Security group for Zerodha trading app" \
+        --region $REGION \
+        --output text \
+        --query 'GroupId')
 
-aws ec2 authorize-security-group-ingress \
-    --group-id $SG_ID \
-    --protocol tcp \
-    --port 80 \
-    --cidr 0.0.0.0/0 \
-    --region $REGION
+    # Add inbound rules
+    aws ec2 authorize-security-group-ingress \
+        --group-id $SG_ID \
+        --protocol tcp \
+        --port 22 \
+        --cidr 0.0.0.0/0 \
+        --region $REGION
 
-aws ec2 authorize-security-group-ingress \
-    --group-id $SG_ID \
-    --protocol tcp \
-    --port 443 \
-    --cidr 0.0.0.0/0 \
-    --region $REGION
+    aws ec2 authorize-security-group-ingress \
+        --group-id $SG_ID \
+        --protocol tcp \
+        --port 80 \
+        --cidr 0.0.0.0/0 \
+        --region $REGION
 
-echo "Security group created: $SG_ID"
+    aws ec2 authorize-security-group-ingress \
+        --group-id $SG_ID \
+        --protocol tcp \
+        --port 443 \
+        --cidr 0.0.0.0/0 \
+        --region $REGION
+
+    echo "Security group created: $SG_ID"
+fi
 
 # Launch EC2 instance
 echo "Launching EC2 instance..."
