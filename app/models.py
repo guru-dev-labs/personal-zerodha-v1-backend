@@ -155,3 +155,28 @@ class BacktestResult(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ShortSellAlert(BaseModel):
+    """Short sell opportunity alert"""
+    id: UUID
+    instrument_token: str
+    instrument_name: str
+    current_price: float
+    price_change_5min: float  # Percentage change in last 5 minutes
+    distance_from_upper_circuit: float  # Percentage away from upper circuit
+    weekly_movement: float  # Movement in last week
+    created_at: datetime
+    expires_at: datetime  # 5 minutes from creation
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+class ShortSellAlertCreate(BaseModel):
+    """Create a short sell alert"""
+    instrument_token: str
+    instrument_name: str
+    current_price: float
+    price_change_5min: float
+    distance_from_upper_circuit: float
+    weekly_movement: float

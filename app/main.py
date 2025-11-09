@@ -21,10 +21,12 @@ import logging.handlers
 import sys
 from typing import Dict
 from datetime import datetime
+import asyncio
 
 from .config import get_settings, Settings
 from .zerodha_client import ZerodhaClient
 from .database import get_redis, init_redis_pool
+from .short_sell_scanner import ShortSellScanner
 from .models import UserBase
 
 # Configure logging
@@ -99,6 +101,16 @@ def get_zerodha_client(settings: Settings = Depends(get_settings)) -> ZerodhaCli
         api_secret=settings.KITE_API_SECRET
     )
 
+# Global scanner instance
+short_sell_scanner = None
+
+def get_short_sell_scanner(zerodha: ZerodhaClient = Depends(get_zerodha_client)) -> ShortSellScanner:
+    """Get the global short sell scanner instance"""
+    global short_sell_scanner
+    if short_sell_scanner is None:
+        short_sell_scanner = ShortSellScanner(zerodha)
+    return short_sell_scanner
+
 @app.on_event("startup")
 async def startup_event():
     """
@@ -108,6 +120,7 @@ async def startup_event():
     1. Initializes Redis connection pool
     2. Verifies critical environment variables
     3. Sets up logging
+    4. Initializes short sell scanner
     """
     logger.info("Starting application initialization")
     try:
@@ -127,6 +140,20 @@ async def startup_event():
                 raise ValueError(f"Missing critical setting: {setting}")
         
         logger.info("Critical settings verified successfully")
+        
+        # Initialize short sell scanner
+        global short_sell_scanner
+        zerodha_client = ZerodhaClient(
+            api_key=settings.KITE_API_KEY,
+            api_secret=settings.KITE_API_SECRET
+        )
+        short_sell_scanner = ShortSellScanner(zerodha_client)
+        await short_sell_scanner.initialize()
+        
+        # Start background scanning
+        asyncio.create_task(short_sell_scanner.start_continuous_scanning())
+        logger.info("Short sell scanner initialized and started")
+        
         logger.info("Application startup completed successfully")
     except Exception as e:
         logger.critical(f"Application startup failed: {str(e)}")
@@ -380,4 +407,88 @@ async def get_holdings(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to fetch holdings: {str(e)}"
+        )
+
+# Short Sell Scanner Endpoints
+
+@app.get("/short-sell/alerts", status_code=status.HTTP_200_OK)
+async def get_short_sell_alerts(
+    scanner: ShortSellScanner = Depends(get_short_sell_scanner)
+) -> Dict:
+    """
+    Get all active short sell alerts.
+    
+    Returns:
+        Dict: List of active short sell opportunities
+    """
+    try:
+        alerts = await scanner.get_active_alerts()
+        return {
+            "status": "success",
+            "alerts": [alert.dict() for alert in alerts],
+            "count": len(alerts)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get short sell alerts: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch alerts"
+        )
+
+@app.get("/short-sell/alerts/{instrument_token}", status_code=status.HTTP_200_OK)
+async def get_short_sell_alert(
+    instrument_token: str,
+    scanner: ShortSellScanner = Depends(get_short_sell_scanner)
+) -> Dict:
+    """
+    Get short sell alert for specific instrument.
+    
+    Args:
+        instrument_token: Zerodha instrument token
+        
+    Returns:
+        Dict: Alert details if active
+    """
+    try:
+        alert = await scanner.get_alert_by_instrument(instrument_token)
+        if alert:
+            return {
+                "status": "success",
+                "alert": alert.dict()
+            }
+        else:
+            return {
+                "status": "not_found",
+                "message": "No active alert for this instrument"
+            }
+    except Exception as e:
+        logger.error(f"Failed to get alert for {instrument_token}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch alert"
+        )
+
+@app.post("/short-sell/scan", status_code=status.HTTP_200_OK)
+async def trigger_manual_scan(
+    scanner: ShortSellScanner = Depends(get_short_sell_scanner)
+) -> Dict:
+    """
+    Manually trigger a short sell scan.
+    
+    Returns:
+        Dict: Scan results
+    """
+    try:
+        await scanner._perform_scan()
+        alerts = await scanner.get_active_alerts()
+        return {
+            "status": "success",
+            "message": "Manual scan completed",
+            "active_alerts": len(alerts)
+        }
+    except Exception as e:
+        logger.error(f"Manual scan failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Manual scan failed"
         )
