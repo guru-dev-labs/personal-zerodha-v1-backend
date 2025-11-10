@@ -19,10 +19,31 @@ class Database:
         )
         
         # Initialize Redis
-        cls.redis = Redis.from_url(
-            settings.REDIS_URL,
-            decode_responses=True  # Automatically decode responses to Python strings
-        )
+        # Try to initialize Redis with retries and exponential backoff to handle
+        # cases where Redis service starts slightly after the application.
+        import asyncio
+        max_retries = 5
+        delay = 0.5
+        last_exc = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                cls.redis = Redis.from_url(
+                    settings.REDIS_URL,
+                    decode_responses=True  # Automatically decode responses to Python strings
+                )
+                # Perform a quick ping to validate connection
+                await cls.redis.ping()
+                break
+            except Exception as e:
+                last_exc = e
+                # Log and retry with backoff
+                # Use print here to avoid importing logger in this module during init
+                print(f"Redis init attempt {attempt} failed: {e}; retrying in {delay}s...")
+                await asyncio.sleep(delay)
+                delay *= 2
+        else:
+            # If all retries failed, raise the last exception so startup can fail loudly
+            raise last_exc
     
     @classmethod
     async def close_db(cls) -> None:
