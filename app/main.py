@@ -15,6 +15,7 @@ Environment variables are managed through .env file and Settings class.
 """
 
 from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import logging.handlers
@@ -82,7 +83,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_zerodha_client(settings: Settings = Depends(get_settings)) -> ZerodhaClient:
+async def get_zerodha_client(
+    request: Request,
+    redis=Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> ZerodhaClient:
     """
     Dependency to get a configured Zerodha client instance.
     
@@ -96,10 +101,36 @@ def get_zerodha_client(settings: Settings = Depends(get_settings)) -> ZerodhaCli
         This is injected into route handlers that need Zerodha access
     """
     logger.debug("Creating new Zerodha client instance")
-    return ZerodhaClient(
+    # Create client and attempt to attach an access token from the request
+    client = ZerodhaClient(
         api_key=settings.KITE_API_KEY,
-        api_secret=settings.KITE_API_SECRET
+        api_secret=settings.KITE_API_SECRET,
+        redirect_url=settings.get_redirect_url()
     )
+
+    # Prefer Authorization header (Bearer) if provided
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(None, 1)[1]
+        client.set_access_token(token)
+        logger.debug("Attached access token from Authorization header (truncated): %s", token[:8])
+        return client
+
+    # Otherwise look for a session cookie with user id and fetch token from Redis
+    user_cookie = request.cookies.get("session_user")
+    if user_cookie:
+        try:
+            stored = await redis.get(f"user:{user_cookie}:token")
+            if stored:
+                client.set_access_token(stored)
+                logger.debug("Attached access token from Redis for user %s (truncated): %s", user_cookie, stored[:8])
+            else:
+                logger.debug("No token found in Redis for user %s", user_cookie)
+        except Exception:
+            # If Redis is unavailable, leave client unauthenticated
+            logger.exception("Failed to fetch token from Redis for user %s", user_cookie)
+
+    return client
 
 # Global scanner instance
 short_sell_scanner = None
@@ -145,7 +176,8 @@ async def startup_event():
         global short_sell_scanner
         zerodha_client = ZerodhaClient(
             api_key=settings.KITE_API_KEY,
-            api_secret=settings.KITE_API_SECRET
+            api_secret=settings.KITE_API_SECRET,
+            redirect_url=settings.get_redirect_url()
         )
         short_sell_scanner = ShortSellScanner(zerodha_client)
         await short_sell_scanner.initialize()
@@ -262,12 +294,12 @@ async def auth_callback(
         logger.debug("Generating session with request token")
         session = zerodha.generate_session(request_token)
         access_token = session["access_token"]
-        
+
         # Get user profile
         logger.debug("Fetching user profile")
         profile = zerodha.get_profile()
         user_id = profile["user_id"]
-        
+
         # Store in Redis with TTL
         logger.debug(f"Storing session for user {user_id}")
         await redis.set(
@@ -275,7 +307,7 @@ async def auth_callback(
             access_token,
             ex=settings.CACHE_TTL_USER_PROFILE
         )
-        
+
         # Log successful authentication
         logger.info(f"Authentication successful for user {user_id}")
         metrics_logger.info(
@@ -284,12 +316,25 @@ async def auth_callback(
             user_id,
             "success"
         )
-        
-        return {
+
+        # Return session and set an HttpOnly cookie so subsequent requests
+        # from the browser can be associated with this user and retrieve token
+        resp = JSONResponse({
             "status": "success",
             "access_token": access_token,
             "profile": profile
-        }
+        })
+        # Cookie lifetime mirrors our profile TTL
+        resp.set_cookie(
+            key="session_user",
+            value=user_id,
+            httponly=True,
+            secure=settings.is_production,
+            samesite="lax",
+            max_age=settings.CACHE_TTL_USER_PROFILE
+        )
+
+        return resp
     except Exception as e:
         logger.error(f"Auth callback failed: {str(e)}")
         metrics_logger.info(

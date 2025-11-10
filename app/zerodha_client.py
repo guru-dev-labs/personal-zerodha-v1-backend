@@ -106,8 +106,9 @@ class ZerodhaClient:
             self.set_access_token(data["access_token"])
             return data
         except Exception as e:
-            logger.error(f"Failed to generate session: {str(e)}")
-            raise HTTPException(status_code=400, detail="Failed to generate session")
+            # Log full traceback and include exception text to help debugging
+            logger.error(f"Failed to generate session: %s", str(e), exc_info=True)
+            raise HTTPException(status_code=400, detail=f"Failed to generate session: {str(e)}")
 
     def get_profile(self) -> Dict:
         """
@@ -122,8 +123,9 @@ class ZerodhaClient:
         try:
             return self.kite.profile()
         except Exception as e:
-            logger.error(f"Failed to fetch profile: {str(e)}")
-            raise HTTPException(status_code=400, detail="Failed to fetch profile")
+            # Log full traceback and include exception text to help debugging
+            logger.error(f"Failed to fetch profile: %s", str(e), exc_info=True)
+            raise HTTPException(status_code=400, detail=f"Failed to fetch profile: {str(e)}")
 
     def get_positions(self) -> Dict:
         """
